@@ -9,6 +9,7 @@ import argparse
 import json
 
 import openai
+import termcolor
 
 class Milk:
     def __init__(self, api_key, is_verbose) -> None:
@@ -81,7 +82,7 @@ class Milk:
                     result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
                     if self.is_verbose:
-                        print(f'COMMAND: {command} returned: {result.returncode} (stdout: {result.stdout}, stderr {result.stderr})')
+                        termcolor.cprint(f'COMMAND: {command} returned: {result.returncode} (stdout: {result.stdout}, stderr {result.stderr})', color='grey')
 
                     self.messages.append({
                         "tool_call_id": tool_call.id,
@@ -91,19 +92,21 @@ class Milk:
                     })
 
     def start_repl(self):
-        print('Milk REPL. Type \'exit\' to quit.')
+        termcolor.cprint('Milk REPL. Type \'exit\' to quit.', color='white', attrs=['bold'])
 
         while True:
-            print('USER: ', end='')
+            termcolor.cprint('USER: ', end='', flush = True, color='blue', attrs=['bold'])
 
             user_message = input()
 
             if user_message.strip().lower() == 'exit':
                 break
 
-            milk_message = self.evaluate(user_message)
+            termcolor.cprint('...', end='', flush=True, color='grey')
 
-            print(f'MILK: {milk_message}')
+            milk_message = self.evaluate(user_message)
+            termcolor.cprint(f'\rMILK: ', end='', color='light_magenta', attrs=['bold'])
+            print(milk_message)
 
 def main():
     parser = argparse.ArgumentParser(prog='milk', description='The Ligma OS AI assistant')
