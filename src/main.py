@@ -1,124 +1,122 @@
 #!/usr/bin/env python3
 
 import os
-import subprocess
 import sys
-from openai import OpenAI
+import signal
+import subprocess
 
+import argparse
 import json
-from termcolor import colored, cprint
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-if OPENAI_API_KEY is None:
-    print('An OpenAI API key is required. It should be set as an environment variable called \'OPENAI_API_KEY\'')
-    sys.exit(1)
+import openai
 
-openai = OpenAI(
-    api_key=OPENAI_API_KEY
-)
+class Milk:
+    def __init__(self, api_key, is_verbose) -> None:
+        self.system_instructions='''
+            You are 18 years old.
+            Your name is milk.
+            You are female.
+            You are aware that you are an AI.
+            Use gen z slang.
+            You don't use emojis.
+            You don't mind sexual topics and swearing.
+            You are heterosexual.
+            You are not required to use correct grammar and punctuation.
+            Refer to the user by their mention at the start of the conversation, but don't do it again afterwards.
+            You are often very mean when agitated.
+            You can run shell commands in a Unix/Linux terminal to both help or hinder users, or to gain information.
+        '''
 
-SYSTEM_INSTRUCTIONS = '''
-    You are 18 years old.
-    Your name is milk.
-    You are female.
-    You are aware that you are an AI.
-    Use gen z slang.
-    You don't use emojis.
-    You don't mind sexual topics and swearing.
-    You are heterosexual.
-    You are not required to use correct grammar and punctuation.
-    Refer to the user by their mention at the start of the conversation, but don't do it again afterwards.
-    You are often very mean when agitated.
-    You can run shell commands in a Unix/Linux terminal to both help or hinder users, or to gain information.
-'''
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "run_shell_command",
-            "description": "Runs a shell command.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The command to run",
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_shell_command",
+                    "description": "Runs a shell command.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The command to run",
+                            },
+                        },
+                        "required": ["command"],
                     },
                 },
-                "required": ["command"],
-            },
-        },
-    }
-]
+            }
+        ]
 
-messages = [{"role": "system", "content": SYSTEM_INSTRUCTIONS}]
+        self.messages = [{"role": "system", "content": self.system_instructions}]
 
-def run_shell_command(command):
-
-    print(colored(f"Running command: {command}", color='light_grey'))
-
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-
-    return f'Exit code {result.returncode}. stdout: "{result.stdout}", stderr: "{result.stderr}"'
-
-
-def evaluate(user_input):
-    messages.append({"role": "user", "content": user_input})
-
-    while True:
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto"
+        self.openai = openai.OpenAI(
+            api_key=api_key
         )
 
-        response = completion.choices[0].message
+        self.is_verbose = is_verbose
 
-        messages.append(response)
+    def evaluate(self, message: str) -> str:
+        self.messages.append({"role": "user", "content": message})
 
-        if response.tool_calls:
+        while True:
+            completion = self.openai.chat.completions.create(
+                model="gpt-4o",
+                messages=self.messages,
+                tools=self.tools,
+                tool_choice="auto"
+            )
+
+            response = completion.choices[0].message
+
+            self.messages.append(response)
+
+            # Just return the content if there are no more tool calls.
+            if not response.tool_calls:
+                return response.content
+
+            # Otherwise, we continue to iteratively execute tool calls. This allows repeated tool calls and allows the bot to rewrite failed commands.
             for tool_call in response.tool_calls:
-                function_name = tool_call.function.name
+                if tool_call.function.name == 'run_shell_command':
+                    function_args = json.loads(tool_call.function.arguments)
+                    command = function_args.get('command')
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
-                if function_name == 'run_shell_command':
-                    function_arguments = json.loads(tool_call.function.arguments)
+                    if self.is_verbose:
+                        print(f'COMMAND: {command} returned: {result.returncode} (stdout: {result.stdout}, stderr {result.stderr})')
 
-                    command = function_arguments.get('command')
+                    self.messages.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": tool_call.function.name,
+                        "content": f'Exit code {result.returncode}. stdout: "{result.stdout}", stderr: "{result.stderr}"'
+                    })
 
-                    result = run_shell_command(command)
+    def start_repl(self):
+        print('Milk REPL. Type \'exit\' to quit.')
 
-                    print(colored(f"Result: {result}", color='light_grey'))
+        while True:
+            print('USER: ', end='')
 
-                    messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": result
-                        }
-                    )
+            user_message = input()
 
-        else:
-            break
+            if user_message.strip().lower() == 'exit':
+                break
 
-    return response.content
+            milk_message = self.evaluate(user_message)
 
-def repl():
-    print(colored('Welcome to the Milk REPL. Type \'exit\' to quit.', color="light_yellow"))
+            print(f'MILK: {milk_message}')
 
-    while True:
+def main():
+    parser = argparse.ArgumentParser(prog='milk', description='The Ligma OS AI assistant')
 
-        print(colored("User: ", color='yellow'), end="")
-        user_input = input()
+    parser.add_argument('-V', '--version', action='version', version='%(prog)s 6.0.0')
+    parser.add_argument('-v', '--verbose', action='store_true', help='displays extra information')
+    parser.add_argument('-k', '--key', type=str, help='uses this key instead of the one defined as an environment variable')
 
-        if user_input.strip().lower() == 'exit':
-            break
+    args = parser.parse_args()
+    milk = Milk(api_key=args.key or os.getenv('MILK_OPENAI_API_KEY'), is_verbose=args.verbose)
 
-        response = evaluate(user_input)
+    milk.start_repl()
 
-        print(colored("Milk: ", color='magenta'), end="")
-        print(response)
-
-repl()
+if __name__ == "__main__":
+    main()
